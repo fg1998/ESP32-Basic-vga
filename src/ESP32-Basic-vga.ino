@@ -352,6 +352,7 @@ const static unsigned char keywords[] PROGMEM = {
   'L','I','N','E'+0x80,
   'R','E','T','A','N','G','L','E'+0x80,
   'E','L','I','P','S','E'+0x80,
+  'C','U','R','S','O','R'+0x80,
   0
 };
 
@@ -381,6 +382,7 @@ enum {
   KW_LINE,
   KW_RETANGLE,
   KW_ELIPSE,
+  KW_CURSOR,
   KW_DEFAULT /* always the final one*/
 };
 
@@ -2113,7 +2115,7 @@ line: {
 
     //Get endY
     expression_error = 0;
-    startY = expression();
+    endY = expression();
     if(expression_error)
       goto qwhat;
 
@@ -2182,7 +2184,7 @@ retangle: {
 
     //Get endY
     expression_error = 0;
-    startY = expression();
+    endY = expression();
     if(expression_error)
       goto qwhat;
 
@@ -2261,6 +2263,20 @@ elipse: {
 
   goto run_next_statement;
 }
+
+cursor: {
+  short int enable;
+    //Get enable
+    expression_error = 0;
+    enable = expression();
+    if(expression_error)
+      goto qwhat;
+
+    Terminal.enableCursor(enable);
+
+  goto run_next_statement;
+}
+
 
 #ifdef ENABLE_TONES
 tonestop:
