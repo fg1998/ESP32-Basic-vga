@@ -1,12 +1,21 @@
 #define kVersion "v0.15"
 
 // v0.15: 2029-10-23
-//      Changer by fg1998 (fg1998@gmail.com)
-//      Modified for new version of FagGL (0.9.0)
+//      Changes by fg1998 (fg1998@gmail.com)
+//      Modified for latest version of FagGL (0.9.0)
 //      Redefined SPI Pins for SD Card work with VGA32_V1.4 from TTGO - SCK = 14,  MISO = 02, MOSI = 12, CS = 13
 //      Backspace is now working with Terminal
-//      LOAD and SAVE working,  needs to start with a '/' ex: LOAD "/test.bas"       
-//      CLS Command 
+//      LOAD and SAVE working,  needs to start with a '/' ex: LOAD "/test.bas"  
+//      Adjust screen resolution to 640x200 (80x25 text) for low ram use
+//      **NEW COMMANDS
+//      CLS
+//      COLOR <INT>,<INT> -> FORECOLOR, BACKCOLOR
+//      POINT <INT>, <INT>, <INT> -> COLOR, X, Y
+//      LINE <INT>, <INT>, <INT>, <INT>, <INT> -> COLOR, INIT X, INIT Y, END X, END Y
+//      RECTANGLE <INT>, <INT>, <INT>, <INT>, <INT>, <INT> -> COLOR, COLOR FILL (-1 USES NO COLOR), INIT X, INIT Y, END X, END Y
+//      ELIPSE <INT>, <INT>, <INT>, <INT> -> COLOR, X, Y, WIDTH, HEIGHT
+//      CURSOR 0/1 -> ENABLE/DISABLE CURSOR
+//      
 // v0.14: 2013-11-07
 //      Input command always set the variable to 99
 //      Modified Input command to accept an expression using getn()
@@ -350,7 +359,7 @@ const static unsigned char keywords[] PROGMEM = {
   'C','O','L','O','R'+0x80,
   'P','O','I','N','T'+0x80,
   'L','I','N','E'+0x80,
-  'R','E','T','A','N','G','L','E'+0x80,
+  'R','E','C','T','A','N','G','L','E'+0x80,
   'E','L','I','P','S','E'+0x80,
   'C','U','R','S','O','R'+0x80,
   0
@@ -380,7 +389,7 @@ enum {
   KW_COLOR,
   KW_POINT,
   KW_LINE,
-  KW_RETANGLE,
+  KW_RECTANGLE,
   KW_ELIPSE,
   KW_CURSOR,
   KW_DEFAULT /* always the final one*/
@@ -1279,10 +1288,12 @@ interperateAtTxtpos:
     goto point;
   case KW_LINE:
     goto line;
-  case  KW_RETANGLE:
-    goto retangle;
+  case  KW_RECTANGLE:
+    goto rectangle;
   case KW_ELIPSE:
     goto elipse;
+  case KW_CURSOR:
+    goto cursor;
   case KW_DEFAULT:
     goto assignment;
   default:
@@ -2126,8 +2137,9 @@ line: {
   goto run_next_statement;
 }
 
-retangle: {
+rectangle: {
   short int color;
+  short int fillColor;
   short int startX;
   short int startY;
   short int endX;
@@ -2136,6 +2148,18 @@ retangle: {
     //Get color
     expression_error = 0;
     color = expression();
+    if(expression_error)
+      goto qwhat;
+
+    ignore_blanks();
+    if (*txtpos != ',')
+      goto qwhat;
+    txtpos++;
+    ignore_blanks();
+
+    //Get fillColor
+    expression_error = 0;
+    fillColor = expression();
     if(expression_error)
       goto qwhat;
 
@@ -2190,6 +2214,16 @@ retangle: {
 
     setPenColor(color);
     cv.drawRectangle(startX, startY, endX, endY);
+
+
+    //Fills the retangle
+    if(fillColor > -1) {
+      setPenColor(fillColor);
+      for(short int y = startY+ 1; y < endY; y++ ){
+        cv.drawLine(startX +1 , y, endX-1, y);
+      }
+      
+    }
 
 
   goto run_next_statement;
@@ -2271,7 +2305,7 @@ cursor: {
     enable = expression();
     if(expression_error)
       goto qwhat;
-
+      
     Terminal.enableCursor(enable);
 
   goto run_next_statement;
