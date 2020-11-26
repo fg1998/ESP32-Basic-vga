@@ -2,6 +2,7 @@
 
 // v0.15: 2029-10-23
 //      Changes by fg1998 (fg1998@gmail.com)
+//      Only for ESP32 with FabGL !!!!!!
 //      Modified for latest version of FagGL (0.9.0)
 //      Redefined SPI Pins for SD Card work with VGA32_V1.4 from TTGO - SCK = 14,  MISO = 02, MOSI = 12, CS = 13
 //      Backspace is now working with Terminal
@@ -11,10 +12,12 @@
 //      CLS
 //      COLOR <INT>,<INT> -> FORECOLOR, BACKCOLOR
 //      POINT <INT>, <INT>, <INT> -> COLOR, X, Y
-//      LINE <INT>, <INT>, <INT>, <INT>, <INT> -> COLOR, INIT X, INIT Y, END X, END Y
-//      RECTANGLE <INT>, <INT>, <INT>, <INT>, <INT>, <INT> -> COLOR, COLOR FILL (-1 USES NO COLOR), INIT X, INIT Y, END X, END Y
-//      ELIPSE <INT>, <INT>, <INT>, <INT> -> COLOR, X, Y, WIDTH, HEIGHT
+//      LINE <INT>, <INT>, <INT>, <INT>, <INT>, <INT>  -> COLOR, INIT X, INIT Y, END X, END Y, PEN WIDTH
+//      RECTANGLE <INT>, <INT>, <INT>, <INT>, <INT>, <INT>, <INT> -> COLOR, COLOR FILL (-1 USES NO COLOR), INIT X, INIT Y, END X, END Y, PEN WIDTH
+//      ELIPSE <INT>, <INT>, <INT>, <INT>, <INT> -> COLOR, X, Y, WIDTH, HEIGHT, PEN WIDTH
 //      CURSOR 0/1 -> ENABLE/DISABLE CURSOR
+//      AT <INT>,<INT> -> puts cursor on x,y
+
 //      
 // v0.14: 2013-11-07
 //      Input command always set the variable to 99
@@ -85,8 +88,6 @@
 //  Quirk:  "10 LET A=B+C" is ok "10 LET A = B + C" is not.
 //  Quirk:  INPUT seems broken?
 
-// IF testing with Visual C, this needs to be the first thing in the file.
-//#include "stdafx.h"
 
 char eliminateCompileErrors = 1;  // fix to suppress arduino build errors
 int myScreen; 
@@ -134,7 +135,7 @@ int myScreen;
 // arduino.  Disable it for DUE/other devices.
 //#define ENABLE_EEPROM 1
 #undef ENABLE_EEPROM
-#include "WiFi.h"
+#include "WiFi.h" // include this or you´ll get erro in FabGL
 #include "fabgl.h" 
 
 
@@ -144,6 +145,7 @@ fabgl::VGAController VGAController;
 fabgl::PS2Controller PS2Controller;
 fabgl::Terminal      Terminal;
 Canvas cv(&VGAController);
+TerminalController tc(&Terminal);
 
 
 
@@ -182,20 +184,10 @@ void print_info()
 #undef ENABLE_EEPROM //----------------------------- provo a commentare questo ma non va --------------------------------------- 
 #undef ENABLE_TONES  //----------------------------- provo a commentare questo ma non va --------------------------------------- 
 
-#else
-// we're an AVR!
-
-// we're moving our data strings into progmem
-#include <avr/pgmspace.h>
 #endif
 
-// includes, and settings for Arduino-specific functionality
-#ifdef ENABLE_EEPROM
-#include <EEPROM.h>  /* NOTE: case sensitive */
-int eepos = 0;
-#endif
 
-#ifdef ENABLE_FILEIO
+
 #include <FS.h> 
 #include <SD.h>
 #include <SPI.h> /* needed as of 1.5 beta */
@@ -213,7 +205,7 @@ SPIClass spiSD(HSPI);
 #define kSD_OK    1
 
 File fp;
-#endif
+
 
 // set up our RAM buffer size for program and user input
 // NOTE: This number will have to change if you include other libraries.
@@ -362,6 +354,8 @@ const static unsigned char keywords[] PROGMEM = {
   'R','E','C','T','A','N','G','L','E'+0x80,
   'E','L','I','P','S','E'+0x80,
   'C','U','R','S','O','R'+0x80,
+  'A','T'+0x80,
+  'I','N','K','E','Y'+0x80,
   0
 };
 
@@ -392,6 +386,8 @@ enum {
   KW_RECTANGLE,
   KW_ELIPSE,
   KW_CURSOR,
+  KW_AT,
+  KW_INKEY,
   KW_DEFAULT /* always the final one*/
 };
 
@@ -681,6 +677,7 @@ void printmsg(const unsigned char *msg)
 /***************************************************************************/
 static void getln(char prompt)
 {
+ 
   outchar(prompt);
   txtpos = program_end+sizeof(LINENUM);
 
@@ -705,7 +702,6 @@ static void getln(char prompt)
       Terminal.write("\b\e[K");
       break;
       
-      break;
     default:
       // We need to leave at least one space to allow us to shuffle the line into order
       if(txtpos == variables_begin-2)
@@ -843,14 +839,14 @@ static short int expr4(void)
         return -a;
       return a;
 
-#ifdef ARDUINO
+
     case FUNC_AREAD:
       pinMode( a, INPUT );
       return analogRead( a );                        
     case FUNC_DREAD:
       pinMode( a, INPUT );
       return digitalRead( a );
-#endif
+
 
     case FUNC_RND:
 #ifdef ARDUINO
@@ -1294,6 +1290,8 @@ interperateAtTxtpos:
     goto elipse;
   case KW_CURSOR:
     goto cursor;
+  case KW_AT:
+    goto at;
   case KW_DEFAULT:
     goto assignment;
   default:
@@ -1886,6 +1884,8 @@ rseed:
 cls:
 {
   Terminal.clear();
+  //tc.clear();
+  //tc.setCursorPos(0,0);
   goto run_next_statement;
 } 
 
@@ -2074,7 +2074,7 @@ line: {
   short int startY;
   short int endX;
   short int endY;
-
+  short int penWidth;
     //Get color
     expression_error = 0;
     color = expression();
@@ -2122,15 +2122,27 @@ line: {
       goto qwhat;
     txtpos++;
     ignore_blanks();
-
-
+    
     //Get endY
     expression_error = 0;
     endY = expression();
     if(expression_error)
       goto qwhat;
 
+    ignore_blanks();
+    if (*txtpos != ',')
+      goto qwhat;
+    txtpos++;
+    ignore_blanks();
+
+    //Get pen width
+    expression_error = 0;
+    penWidth = expression();
+    if(expression_error)
+      goto qwhat;
+
     setPenColor(color);
+    cv.setPenWidth(penWidth);
     cv.drawLine(startX, startY, endX, endY);
 
 
@@ -2144,6 +2156,7 @@ rectangle: {
   short int startY;
   short int endX;
   short int endY;
+  short int penWidth;
 
     //Get color
     expression_error = 0;
@@ -2212,12 +2225,27 @@ rectangle: {
     if(expression_error)
       goto qwhat;
 
+    ignore_blanks();
+    if (*txtpos != ',')
+      goto qwhat;
+    txtpos++;
+    ignore_blanks();
+
+    //Get pen width
+    expression_error = 0;
+    penWidth = expression();
+    if(expression_error)
+      goto qwhat;
+
     setPenColor(color);
+    cv.setPenWidth(penWidth);
     cv.drawRectangle(startX, startY, endX, endY);
 
 
+    cv.setPenWidth(1);
     //Fills the retangle
     if(fillColor > -1) {
+      
       setPenColor(fillColor);
       for(short int y = startY+ 1; y < endY; y++ ){
         cv.drawLine(startX +1 , y, endX-1, y);
@@ -2235,6 +2263,7 @@ elipse: {
   short int y;
   short int width;
   short int height;
+  short int penWidth;
 
     //Get color
     expression_error = 0;
@@ -2291,7 +2320,25 @@ elipse: {
     if(expression_error)
       goto qwhat;
 
+    ignore_blanks();
+    if (*txtpos != ',')
+      goto qwhat;
+    txtpos++;
+    ignore_blanks();
+
+
+
+    //Get penWidth
+    expression_error = 0;
+    penWidth = expression();
+    if(expression_error)
+      goto qwhat;
+
+
+
     setPenColor(color);
+    cv.setPenWidth(penWidth);
+    
     cv.drawEllipse(x, y, width, height);
 
 
@@ -2309,6 +2356,32 @@ cursor: {
     Terminal.enableCursor(enable);
 
   goto run_next_statement;
+}
+
+at: {
+    short int x;
+    short int y;
+      //Get X
+    expression_error = 0;
+    x = expression();
+    if(expression_error)
+      goto qwhat;
+
+    ignore_blanks();
+    if (*txtpos != ',')
+      goto qwhat;
+    txtpos++;
+    ignore_blanks();
+
+
+    //Get height
+    expression_error = 0;
+    y = expression();
+    if(expression_error)
+      goto qwhat;
+
+    tc.setCursorPos(x,y);
+    goto run_next_statement;
 }
 
 
