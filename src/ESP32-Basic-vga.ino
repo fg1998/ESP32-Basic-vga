@@ -1,4 +1,12 @@
 #define kVersion "v0.15"
+// v016. 2026-02-23
+// New Commands
+//  WIFISCAN
+//  WIFICONNECT "<SSID>", "<PASSWORD>"
+//  WIFISTATUS
+//  WIFIDISCONNECT
+//  HTTPGET "URL"
+
 
 // v0.15: 2029-10-23
 //      Changes by fg1998 (fg1998@gmail.com)
@@ -136,6 +144,7 @@ int myScreen;
 //#define ENABLE_EEPROM 1
 #undef ENABLE_EEPROM
 #include "WiFi.h" // include this or you´ll get erro in FabGL
+#include <HTTPClient.h>
 #include "fabgl.h" 
 
 
@@ -153,7 +162,7 @@ void print_info()
 {
   Terminal.write("\e[33mESP32 TinyBasic PC with VGA monitor and PS2keyboard\r\n");
   Terminal.write("\e[32mby Roberto Melzi\e[32m\r\n\n");
-  Terminal.write("\e[32mVGA32_V1.4 by fg1998 \e[31m github.com/fg1998/ESP32-Basic-vga \e[32m\r\n\n");
+  Terminal.write("\e[32mVGA32_V0.15 by fg1998 \e[31m github.com/fg1998/ESP32-Basic-vga \e[32m\r\n\n");
   Terminal.write("\e[37mFabGL - Loopback VT/ANSI Terminal\r\n");
   Terminal.write("\e[37m2019 by Fabrizio Di Vittorio - www.fabgl.com\e[32m\r\n\n");
   Terminal.printf("\e[31mScreen Size        :\e[33m %d x %d\r\n", VGAController.getScreenWidth(), VGAController.getScreenHeight());
@@ -356,6 +365,11 @@ const static unsigned char keywords[] PROGMEM = {
   'C','U','R','S','O','R'+0x80,
   'A','T'+0x80,
   'I','N','K','E','Y'+0x80,
+  'W','I','F','I','S','C','A','N'+0x80,
+  'W','I','F','I','C','O','N','N','E','C','T'+0x80,
+  'W','I','F','I','S','T','A','T','U','S'+0x80,
+  'W','I','F','I','D','I','S','C','O','N','N','E','C','T'+0x80,
+  'H','T','T','P','G','E','T'+0x80,
   0
 };
 
@@ -388,6 +402,12 @@ enum {
   KW_CURSOR,
   KW_AT,
   KW_INKEY,
+  KW_WIFISCAN,
+  KW_WIFICONNECT,
+  KW_WIFISTATUS,
+  KW_WIFIDISCONNECT,
+  KW_HTTPGET,
+  KW_HTTPLOAD,
   KW_DEFAULT /* always the final one*/
 };
 
@@ -1292,6 +1312,16 @@ interperateAtTxtpos:
     goto cursor;
   case KW_AT:
     goto at;
+  case KW_WIFISCAN:
+      goto wifi_scan;
+  case KW_WIFICONNECT:
+      goto wifi_connect;
+  case KW_WIFISTATUS:
+      goto wifi_status;
+  case KW_WIFIDISCONNECT:
+      goto wifi_disconnect;
+  case KW_HTTPGET:
+      goto httpget;
   case KW_DEFAULT:
     goto assignment;
   default:
@@ -2344,6 +2374,168 @@ elipse: {
 
   goto run_next_statement;
 }
+
+
+wifi_scan: {
+  Terminal.write("Scanning WiFi networks...\r\n");
+  
+  // Em vez de forçar o mode(WIFI_STA) toda vez, apenas garantimos 
+  // que o rádio está ligado. Se já estiver em STA, ele ignora.
+  if (WiFi.getMode() == WIFI_OFF) {
+      WiFi.mode(WIFI_STA);
+      delay(100);
+  }
+
+  // O parâmetro 'false' no scanNetworks torna o scan síncrono (bloqueante),
+  // o que é mais seguro para o interpretador Basic.
+  int n = WiFi.scanNetworks(false, false, false, 300); 
+  
+  if (n < 0) {
+    Terminal.write("Scan failed. Try again.\r\n");
+  } else if (n == 0) {
+    Terminal.write("No networks found.\r\n");
+  } else {
+    Terminal.printf("%d networks found:\r\n", n);
+    for (int i = 0; i < n; ++i) {
+      Terminal.printf("%d: %s (%d dBm) [CH: %d]\r\n", 
+                      i + 1, 
+                      WiFi.SSID(i).c_str(), 
+                      WiFi.RSSI(i), 
+                      WiFi.channel(i));
+      delay(5); // Pequeno fôlego para o Terminal VGA
+    }
+  }
+  
+  // Limpa os resultados da memória para evitar o erro de deinit posterior
+  WiFi.scanDelete(); 
+  
+  goto run_next_statement;
+}
+
+
+
+wifi_connect: {
+  char ssid[32];
+  char pass[64];
+  int i = 0;
+
+  // 1. Capturar o SSID (entre aspas)
+  ignore_blanks();
+  if (*txtpos != '"' && *txtpos != '\'') goto qwhat;
+  unsigned char delim = *txtpos++;
+  while (*txtpos != delim && i < 31) ssid[i++] = *txtpos++;
+  ssid[i] = '\0';
+  if (*txtpos++ != delim) goto qwhat;
+
+  // 2. Pular a vírgula
+  ignore_blanks();
+  if (*txtpos != ',') goto qwhat;
+  txtpos++;
+  ignore_blanks();
+
+  // 3. Capturar a Senha (entre aspas)
+  if (*txtpos != '"' && *txtpos != '\'') goto qwhat;
+  delim = *txtpos++;
+  i = 0;
+  while (*txtpos != delim && i < 63) pass[i++] = *txtpos++;
+  pass[i] = '\0';
+  if (*txtpos++ != delim) goto qwhat;
+
+  // 4. Iniciar Conexão
+  Terminal.printf("\r\nConnecting to %s...", ssid);
+  WiFi.begin(ssid, pass);
+
+  // Tentativa de conexão (timeout de 10 segundos)
+  int attempts = 0;
+  while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+    delay(500);
+    Terminal.write(".");
+    attempts++;
+  }
+
+  if (WiFi.status() == WL_CONNECTED) {
+    Terminal.printf("\r\nConnected! IP: %s\r\n", WiFi.localIP().toString().c_str());
+  } else {
+    Terminal.write("\r\nFailed to connect.\r\n");
+  }
+
+  goto run_next_statement;
+}
+
+wifi_status: {
+  if (WiFi.status() == WL_CONNECTED) {
+    Terminal.write("\r\nStatus: CONNECTED");
+    Terminal.printf("\r\nSSID  : %s", WiFi.SSID().c_str());
+    Terminal.printf("\r\nIP    : %s", WiFi.localIP().toString().c_str());
+    Terminal.printf("\r\nRSSI  : %d dBm\r\n", WiFi.RSSI());
+  } else {
+    Terminal.write("\r\nStatus: DISCONNECTED\r\n");
+    // Mostra o motivo técnico se não estiver conectado
+    Terminal.printf("Reason Code: %d\r\n", WiFi.status());
+  }
+  goto run_next_statement;
+}
+
+
+wifi_disconnect: {
+  Terminal.write("\r\nDisconnecting...");
+  
+  // WiFi.disconnect(apagar_credenciais, desligar_radio)
+  WiFi.disconnect(true, true); 
+  
+  // Garante que o rádio está em modo OFF para economizar energia
+  WiFi.mode(WIFI_OFF);
+  
+  Terminal.write(" WiFi OFF.\r\n");
+  goto run_next_statement;
+}
+
+
+
+httpget: {
+  char url[128];
+  int i = 0;
+
+  // 1. Capturar a URL (entre aspas)
+  ignore_blanks();
+  if (*txtpos != '"' && *txtpos != '\'') goto qwhat;
+  unsigned char delim = *txtpos++;
+  while (*txtpos != delim && i < 127) url[i++] = *txtpos++;
+  url[i] = '\0';
+  if (*txtpos++ != delim) goto qwhat;
+
+  // 2. Verificar conexão antes de tentar
+  if (WiFi.status() != WL_CONNECTED) {
+    Terminal.write("\r\nError: Not connected to WiFi.\r\n");
+    goto run_next_statement;
+  }
+
+  // 3. Executar o GET
+  HTTPClient http;
+  Terminal.printf("\r\nRequesting: %s\r\n", url);
+  
+  http.begin(url);
+  int httpCode = http.GET();
+
+  if (httpCode > 0) { // Sucesso
+    if (httpCode == HTTP_CODE_OK) {
+      String payload = http.getString();
+      Terminal.printf("Response (Code %d):\r\n", httpCode);
+      Terminal.write("----------------------------\r\n");
+      Terminal.write(payload.c_str());
+      Terminal.write("\r\n----------------------------\r\n");
+    } else {
+      Terminal.printf("HTTP Warning: %d\r\n", httpCode);
+    }
+  } else {
+    Terminal.printf("HTTP Error: %s\r\n", http.errorToString(httpCode).c_str());
+  }
+
+  http.end(); // Fecha a conexão
+  goto run_next_statement;
+}
+
+
 
 cursor: {
   short int enable;
