@@ -1,5 +1,22 @@
 # ESP32-Basic-vga
 
+### It has been a long time since the last update. As always, I’ll say that I intend to update more frequently over time, but you all know that’s not true.
+Among so many things, I finally managed to get a monitor with a VGA input to plug in my ESP32-VGA, which made things much easier.
+
+Now, let's get down to business – new commands for our TinyBasic:
+
+- WIFISCAN
+- WIFICONNECT "<SSID>", "<PASSWORD>"
+- WIFISTATUS
+- WIFIDISCONNECT
+- HTTPGET "URL"
+
+I think all commands are self-explanatory. The goal is to connect our little computer to the outside world using the commands above.
+
+Coming soon, I promise, we will have news. I REALLY PROMISE!
+
+# What is this ?
+
 This is a modified version of ESP32 Computer Basic with vga found on [instructables](https://www.instructables.com/ESP32-Basic-PC-With-VGA-Output/) with some improvements
 
 - Works with latest version of [FABgl](http://www.fabglib.org/classfabgl_1_1_terminal.html)
